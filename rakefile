@@ -1,0 +1,109 @@
+require 'encrypted_strings'
+require 'erb'
+
+class PackageTemplate
+    attr_accessor :problem
+
+    def template_binding
+        binding
+    end
+end
+
+def create_from_template(template, data)
+    puts "Creating file from '#{template}'..."
+
+    problem_dir = "#{File.dirname(__FILE__)}/#{data.problem}"
+    FileUtils.mkdir_p(problem_dir)
+
+    template_file = File.read("#{File.dirname(__FILE__)}/#{template}")
+    target_file   = File.open("#{problem_dir}/#{template.gsub(/(\.erb)$/,'')}", 'w+')
+
+    erb = ERB.new template_file
+    target_file << erb.result(data.template_binding)
+
+    target_file.close
+end
+
+task :new, :problem do |t, args|
+
+    templates = [
+        'package.json.erb',
+        'euler.js.erb',
+        'euler_specs.js.erb'
+    ]
+
+    puts "========================================"
+    puts "= Creating files from templates:"
+    puts ""
+
+    data = PackageTemplate.new
+    data.problem = args[:problem]
+
+    templates.each do |template|
+        create_from_template(template, data)
+    end
+
+    puts ""
+    puts "========================================"
+    puts "= Installing Packages:"
+    puts ""
+
+    problem_dir = "#{File.dirname(__FILE__)}/#{data.problem}"
+    Dir.chdir(problem_dir) do
+        `npm install`
+    end
+end
+
+task :enc, [:problem, :password] do |t, args|
+    pass    = args[:password]
+    problem = args[:problem]
+    dir     = "#{problem}"
+    files   = FileList.new("#{dir}/*.js")
+
+    files.each do |file|
+        fileOut = "#{file}_enc"
+        puts "Encrypting #{file} => #{fileOut} with password #{pass}..."
+
+        contents = File.read(file)
+        encrypted = contents.encrypt(
+            :symmetric,
+            :algorithm => 'des-ecb',
+            :password => pass
+        )
+
+        File.open(fileOut, 'w') do |f|
+            f.write(encrypted)
+        end
+    end
+end
+
+task :dec, [:problem, :password] do |t, args|
+    pass    = args[:password]
+    problem = args[:problem]
+    dir     = "#{problem}"
+    files   = FileList.new("#{dir}/*.js_enc")
+
+    files.each do |file|
+        base = File.basename(file, '.js_enc')
+        fileOut = "#{dir}/#{base}.js"
+
+        puts "Decrypting #{file} => #{fileOut} with password #{pass}..."
+        if File.exists?(fileOut) then
+            puts "File '#{fileOut}' already exists. Overwrite? (yes/no)"
+            answer = STDIN.gets.strip
+
+            break unless answer == "yes"
+        end
+
+        contents = File.read(file)
+        decrypted = contents.decrypt(
+            :symmetric,
+            :algorithm => 'des-ecb',
+            :password => pass
+        )
+
+        File.open(fileOut, 'w') do |f|
+            f.write(decrypted)
+        end
+    end
+end
